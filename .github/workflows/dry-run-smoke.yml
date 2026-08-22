@@ -1,0 +1,46 @@
+name: Dry-run smoke
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Dry-run only — never set XAI_API_KEY here.
+      GROK_A2A_DRY_RUN: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: python -m pip install -e .
+
+      - name: Start server and run smoke client
+        run: |
+          set -euo pipefail
+          python -m grok_a2a &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9999/.well-known/agent-card.json >/dev/null; then
+              python scripts/smoke_client.py --text "ping"
+              exit 0
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "Server exited before becoming ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "Server did not become ready in time" >&2
+          exit 1
