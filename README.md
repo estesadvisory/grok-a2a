@@ -16,7 +16,7 @@ Expose Grok as an A2A agent so other agents can discover an Agent Card and hand 
 | Auth | Operator’s own `XAI_API_KEY` (env / `.env`) |
 | Dry-run | `GROK_A2A_DRY_RUN=1` for local smoke without calling xAI |
 
-**Not in v0.1:** Artifactum, multi-tenant SaaS, streaming, official xAI branding.
+**Not in v0.1:** streaming, inbound client auth, task cancel, official xAI branding.
 
 ## Quick start
 
@@ -61,11 +61,6 @@ python scripts/smoke_client.py --text "ping"
 | `GROK_A2A_DRY_RUN` | `0` | `1` = fake replies, no xAI call |
 
 Never commit `.env` or API keys.
-
-## A2A + MCP
-
-- **A2A** — agent ↔ agent task handoff (this repo)
-- **MCP** — agent ↔ tools/data (use separately; not bundled here)
 
 ## License
 
