@@ -13,10 +13,12 @@ Expose Grok as an A2A agent so other agents can discover an Agent Card and hand 
 |-------|--------|
 | Agent Card | `GET /.well-known/agent-card.json` |
 | Task handler | A2A JSON-RPC → xAI Chat Completions API |
-| Auth | Operator’s own `XAI_API_KEY` (env / `.env`) |
+| Auth | Operator’s own `XAI_API_KEY` (env / `.env`). Inbound A2A uses optional `GROK_A2A_TOKEN`. |
 | Dry-run | `GROK_A2A_DRY_RUN=1` for local smoke without calling xAI |
 
-**Not in v0.1:** streaming, inbound client auth, task cancel, official xAI branding.
+**Not in v0.1:** streaming, task cancel, official xAI branding.
+
+Inbound auth is **required before any non-localhost bind** (or a non-loopback `PUBLIC_URL`). Loopback (`127.0.0.1`) may omit the token. Set `GROK_A2A_TOKEN` and send `Authorization: Bearer …` on JSON-RPC once you expose the port.
 
 ## Quick start
 
@@ -49,6 +51,15 @@ GROK_A2A_DRY_RUN=1 python -m grok_a2a
 python scripts/smoke_client.py --text "ping"
 ```
 
+Non-loopback bind (requires inbound token):
+
+```bash
+export GROK_A2A_TOKEN=your-shared-token
+HOST=0.0.0.0 PUBLIC_URL=http://0.0.0.0:9999 python -m grok_a2a
+# other terminal (same token value):
+python scripts/smoke_client.py --text "ping" --token "$GROK_A2A_TOKEN"
+```
+
 ## Environment
 
 | Variable | Default | Meaning |
@@ -56,8 +67,10 @@ python scripts/smoke_client.py --text "ping"
 | `XAI_API_KEY` | _(required unless dry-run)_ | xAI API key |
 | `XAI_API_BASE` | `https://api.x.ai/v1` | API base |
 | `GROK_MODEL` | `grok-4-1-fast-reasoning` | Model id |
-| `HOST` / `PORT` | `127.0.0.1` / `9999` | Bind address |
-| `PUBLIC_URL` | `http://127.0.0.1:9999` | URL advertised on the Agent Card |
+| `HOST` / `PORT` | `127.0.0.1` / `9999` | Bind address. Non-loopback HOST requires `GROK_A2A_TOKEN`. |
+| `PUBLIC_URL` | `http://127.0.0.1:9999` | URL advertised on the Agent Card. Non-loopback URL requires `GROK_A2A_TOKEN`. |
+| `GROK_A2A_TOKEN` | _(empty)_ | Shared inbound Bearer token. Required on JSON-RPC when set. Agent Card stays public. |
+| `GROK_A2A_RATE_LIMIT` | `0` | Optional JSON-RPC requests per client IP per 60s (`0` = off). |
 | `GROK_A2A_DRY_RUN` | `0` | `1` = fake replies, no xAI call |
 
 Never commit `.env` or API keys.
