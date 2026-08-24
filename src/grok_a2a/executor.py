@@ -41,23 +41,49 @@ class GrokAgentExecutor(AgentExecutor):
             self._ended.add(task_id)
             return True
 
+    async def _begin(self, task_id: str, abort: asyncio.Event) -> bool:
+        async with self._end_lock:
+            if task_id in self._ended:
+                return False
+            self._inflight[task_id] = abort
+            return True
+
+    async def _emit_canceled(self, updater: TaskUpdater, task_id: str) -> None:
+        if await self._claim_end(task_id):
+            await updater.update_status(
+                state=TaskState.TASK_STATE_CANCELED,
+                message=new_text_message("Canceled."),
+            )
+
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        created = False
         if context.current_task:
             task = context.current_task
         else:
             task = new_task_from_user_message(context.message)
-            await event_queue.enqueue_event(task)
+            created = True
 
         abort = asyncio.Event()
-        self._inflight[task.id] = abort
+        if not await self._begin(task.id, abort):
+            return
+
         updater = TaskUpdater(
             event_queue=event_queue, task_id=task.id, context_id=task.context_id
         )
         try:
+            if created:
+                await event_queue.enqueue_event(task)
+            if abort.is_set():
+                await self._emit_canceled(updater, task.id)
+                return
+
             await updater.update_status(
                 state=TaskState.TASK_STATE_WORKING,
                 message=new_text_message("Calling Grok…"),
             )
+            if abort.is_set():
+                await self._emit_canceled(updater, task.id)
+                return
 
             query = get_message_text(context.message)
             try:
@@ -65,9 +91,13 @@ class GrokAgentExecutor(AgentExecutor):
                     user_request=query or "", abort=abort
                 )
             except asyncio.CancelledError:
+                await self._emit_canceled(updater, task.id)
                 raise
             except Exception as exc:  # noqa: BLE001 — surface to A2A client
-                if abort.is_set() or not await self._claim_end(task.id):
+                if abort.is_set():
+                    await self._emit_canceled(updater, task.id)
+                    return
+                if not await self._claim_end(task.id):
                     return
                 await updater.update_status(
                     state=TaskState.TASK_STATE_FAILED,
@@ -76,6 +106,7 @@ class GrokAgentExecutor(AgentExecutor):
                 return
 
             if abort.is_set():
+                await self._emit_canceled(updater, task.id)
                 return
             if not await self._claim_end(task.id):
                 return

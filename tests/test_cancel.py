@@ -141,6 +141,31 @@ class ExecutorCancelTests(unittest.IsolatedAsyncioTestCase):
         await executor.execute(ctx, queue)
         self.assertIn(TaskState.TASK_STATE_COMPLETED, _canceled_states(queue))
 
+    async def test_execute_cancelled_error_emits_canceled(self) -> None:
+        agent = HangingAgent()
+        executor = GrokAgentExecutor(agent=agent)
+        queue = FakeQueue()
+        ctx = _context()
+        exec_task = asyncio.create_task(executor.execute(ctx, queue))
+        await asyncio.wait_for(agent.started.wait(), timeout=2)
+        exec_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(exec_task, timeout=2)
+        self.assertIn(TaskState.TASK_STATE_CANCELED, _canceled_states(queue))
+        self.assertNotIn(TaskState.TASK_STATE_COMPLETED, _canceled_states(queue))
+
+    async def test_cancel_before_execute_skips_invoke(self) -> None:
+        agent = HangingAgent()
+        executor = GrokAgentExecutor(agent=agent)
+        queue = FakeQueue()
+        ctx = _context()
+        await executor.cancel(ctx, queue)
+        await executor.execute(ctx, queue)
+        self.assertFalse(agent.started.is_set())
+        self.assertIn(TaskState.TASK_STATE_CANCELED, _canceled_states(queue))
+        self.assertNotIn(TaskState.TASK_STATE_WORKING, _canceled_states(queue))
+        self.assertNotIn(TaskState.TASK_STATE_COMPLETED, _canceled_states(queue))
+
 
 class _HangServer:
     """Local TCP server that accepts one HTTP client and never replies."""
