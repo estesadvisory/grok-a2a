@@ -30,10 +30,10 @@ Cross-repo standards live in **[estesadvisory/portfolio-ops](https://github.com/
 
 - Stay **unofficial**. Do not imply xAI endorsement, official branding, or catalog listing.
 - Operator supplies their own `XAI_API_KEY` in gitignored `.env`. Never commit keys or paste them into issues/chat.
-- Bind **localhost** (`127.0.0.1`) until inbound auth lands ([#3](https://github.com/estesadvisory/grok-a2a/issues/3)). Anyone who can reach the port can spend the operator’s xAI key.
+- Non-loopback bind (or non-loopback `PUBLIC_URL`) requires `GROK_A2A_TOKEN` ([#3](https://github.com/estesadvisory/grok-a2a/issues/3)). Anyone who can reach the port without that token can spend the operator’s xAI key.
 - Dry-run (`GROK_A2A_DRY_RUN=1`) is the CI/smoke path without credits. Live Chat Completions smoke stays parked until a funded key exists ([#2](https://github.com/estesadvisory/grok-a2a/issues/2)).
 - This is **A2A (the bus)**, not Artifactum (the vault). Do not fold durable storage into this adapter — see [artifactum#162](https://github.com/estesadvisory/artifactum/issues/162).
-- v0.1 does not stream, cancel, or authenticate inbound clients. Those are tracked issues, not silent README lies.
+- v0.1 does not stream or cancel ([#4](https://github.com/estesadvisory/grok-a2a/issues/4), [#5](https://github.com/estesadvisory/grok-a2a/issues/5)). Those are tracked issues, not silent README lies.
 
 ## Useful links
 
