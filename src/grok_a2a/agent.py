@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -33,7 +34,15 @@ class GrokAgent:
         )
         self.timeout_s = timeout_s
 
-    async def invoke(self, user_request: str) -> str:
+    async def invoke(
+        self,
+        user_request: str,
+        *,
+        abort: asyncio.Event | None = None,
+    ) -> str:
+        if abort is not None and abort.is_set():
+            raise asyncio.CancelledError
+
         text = (user_request or "").strip()
         if not text:
             return "No text input was provided."
@@ -60,17 +69,13 @@ class GrokAgent:
             "Content-Type": "application/json",
         }
         url = f"{self.api_base}/chat/completions"
-
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            try:
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                detail = resp.text[:500]
-                raise RuntimeError(
-                    f"xAI API error {resp.status_code}: {detail}"
-                ) from exc
-            data = resp.json()
+        resp = await self._post_json(url, headers=headers, payload=payload, abort=abort)
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = resp.text[:500]
+            raise RuntimeError(f"xAI API error {resp.status_code}: {detail}") from exc
+        data = resp.json()
 
         try:
             content = data["choices"][0]["message"]["content"]
@@ -88,3 +93,42 @@ class GrokAgent:
             content = "".join(parts)
 
         return str(content).strip() or "(empty model response)"
+
+    async def _post_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        abort: asyncio.Event | None,
+    ) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            if abort is None:
+                return await client.post(url, headers=headers, json=payload)
+
+            post_task = asyncio.create_task(
+                client.post(url, headers=headers, json=payload)
+            )
+            abort_task = asyncio.create_task(abort.wait())
+            try:
+                _done, pending = await asyncio.wait(
+                    {post_task, abort_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.shield(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
+                if abort.is_set():
+                    raise asyncio.CancelledError
+                return post_task.result()
+            except asyncio.CancelledError:
+                for task in (post_task, abort_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.shield(
+                    asyncio.gather(post_task, abort_task, return_exceptions=True)
+                )
+                raise

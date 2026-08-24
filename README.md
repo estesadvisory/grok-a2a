@@ -13,10 +13,11 @@ Expose Grok as an A2A agent so other agents can discover an Agent Card and hand 
 |-------|--------|
 | Agent Card | `GET /.well-known/agent-card.json` |
 | Task handler | A2A JSON-RPC → xAI Chat Completions API |
+| Cancel | `CancelTask` marks the task cancelled and aborts an in-flight xAI HTTP request when one is running |
 | Auth | Operator’s own `XAI_API_KEY` (env / `.env`). Inbound A2A uses optional `GROK_A2A_TOKEN`. |
 | Dry-run | `GROK_A2A_DRY_RUN=1` for local smoke without calling xAI |
 
-**Not in v0.1:** streaming, task cancel, official xAI branding.
+**Not in v0.1:** streaming, official xAI branding.
 
 Inbound auth is **required before any non-localhost bind** (or a non-loopback `PUBLIC_URL`). Loopback (`127.0.0.1`) may omit the token. Set `GROK_A2A_TOKEN` and send `Authorization: Bearer …` on JSON-RPC once you expose the port.
 
