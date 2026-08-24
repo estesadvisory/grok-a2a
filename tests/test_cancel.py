@@ -142,46 +142,93 @@ class ExecutorCancelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(TaskState.TASK_STATE_COMPLETED, _canceled_states(queue))
 
 
-class AgentAbortTests(unittest.IsolatedAsyncioTestCase):
-    async def test_invoke_aborts_in_flight_http(self) -> None:
-        accepted = asyncio.Event()
-        disconnected = asyncio.Event()
+class _HangServer:
+    """Local TCP server that accepts one HTTP client and never replies."""
 
+    def __init__(self) -> None:
+        self.accepted = asyncio.Event()
+        self.disconnected = asyncio.Event()
+        self.server: asyncio.Server | None = None
+        self.base: str = ""
+
+    async def start(self) -> None:
         async def _client_connected(
             reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         ) -> None:
-            accepted.set()
+            self.accepted.set()
             try:
                 await reader.read()
             except (ConnectionError, asyncio.IncompleteReadError, asyncio.CancelledError):
                 pass
             finally:
-                disconnected.set()
+                self.disconnected.set()
                 writer.close()
                 try:
                     await writer.wait_closed()
                 except ConnectionError:
                     pass
 
-        server = await asyncio.start_server(_client_connected, "127.0.0.1", 0)
-        host, port = server.sockets[0].getsockname()[:2]
+        self.server = await asyncio.start_server(_client_connected, "127.0.0.1", 0)
+        host, port = self.server.sockets[0].getsockname()[:2]
+        self.base = f"http://{host}:{port}"
+
+    async def aclose(self) -> None:
+        if self.server is not None:
+            self.server.close()
+            await self.server.wait_closed()
+
+
+class AgentAbortTests(unittest.IsolatedAsyncioTestCase):
+    async def _hanging_agent(self) -> tuple[_HangServer, GrokAgent]:
+        hang = _HangServer()
+        await hang.start()
         agent = GrokAgent(
             api_key="test-key",
-            api_base=f"http://{host}:{port}",
+            api_base=hang.base,
             dry_run=False,
             timeout_s=10.0,
         )
+        return hang, agent
+
+    async def test_invoke_aborts_in_flight_http(self) -> None:
+        hang, agent = await self._hanging_agent()
         abort = asyncio.Event()
         try:
             invoke_task = asyncio.create_task(agent.invoke("hello", abort=abort))
-            await asyncio.wait_for(accepted.wait(), timeout=2)
+            await asyncio.wait_for(hang.accepted.wait(), timeout=2)
             abort.set()
             with self.assertRaises(asyncio.CancelledError):
                 await asyncio.wait_for(invoke_task, timeout=2)
-            await asyncio.wait_for(disconnected.wait(), timeout=2)
+            await asyncio.wait_for(hang.disconnected.wait(), timeout=2)
         finally:
-            server.close()
-            await server.wait_closed()
+            await hang.aclose()
+
+    async def test_invoke_task_cancel_still_disconnects(self) -> None:
+        """SDK cancels execute() (the producer) before AgentExecutor.cancel()."""
+        hang, agent = await self._hanging_agent()
+        abort = asyncio.Event()
+        try:
+            invoke_task = asyncio.create_task(agent.invoke("hello", abort=abort))
+            await asyncio.wait_for(hang.accepted.wait(), timeout=2)
+            invoke_task.cancel()
+            abort.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(invoke_task, timeout=2)
+            await asyncio.wait_for(hang.disconnected.wait(), timeout=2)
+        finally:
+            await hang.aclose()
+
+    async def test_invoke_without_abort_cancels_http(self) -> None:
+        hang, agent = await self._hanging_agent()
+        try:
+            invoke_task = asyncio.create_task(agent.invoke("hello"))
+            await asyncio.wait_for(hang.accepted.wait(), timeout=2)
+            invoke_task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(invoke_task, timeout=2)
+            await asyncio.wait_for(hang.disconnected.wait(), timeout=2)
+        finally:
+            await hang.aclose()
 
 
 class JsonRpcCancelTests(unittest.IsolatedAsyncioTestCase):

@@ -102,29 +102,33 @@ class GrokAgent:
         payload: dict[str, Any],
         abort: asyncio.Event | None,
     ) -> httpx.Response:
-        """POST JSON; cancel the in-flight HTTP request if `abort` is set."""
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            if abort is None:
+                return await client.post(url, headers=headers, json=payload)
+
             post_task = asyncio.create_task(
                 client.post(url, headers=headers, json=payload)
             )
-            if abort is None:
-                return await post_task
-
             abort_task = asyncio.create_task(abort.wait())
             try:
-                done, pending = await asyncio.wait(
+                _done, pending = await asyncio.wait(
                     {post_task, abort_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 for task in pending:
                     task.cancel()
                 if pending:
-                    await asyncio.gather(*pending, return_exceptions=True)
+                    await asyncio.shield(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
                 if abort.is_set():
                     raise asyncio.CancelledError
                 return post_task.result()
             except asyncio.CancelledError:
-                if not post_task.done():
-                    post_task.cancel()
-                    await asyncio.gather(post_task, return_exceptions=True)
+                for task in (post_task, abort_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.shield(
+                    asyncio.gather(post_task, abort_task, return_exceptions=True)
+                )
                 raise

@@ -31,6 +31,15 @@ class GrokAgentExecutor(AgentExecutor):
     def __init__(self, agent: GrokAgent | None = None) -> None:
         self.agent = agent or GrokAgent()
         self._inflight: dict[str, asyncio.Event] = {}
+        self._end_lock = asyncio.Lock()
+        self._ended: set[str] = set()
+
+    async def _claim_end(self, task_id: str) -> bool:
+        async with self._end_lock:
+            if task_id in self._ended:
+                return False
+            self._ended.add(task_id)
+            return True
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         if context.current_task:
@@ -58,7 +67,7 @@ class GrokAgentExecutor(AgentExecutor):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 — surface to A2A client
-                if abort.is_set():
+                if abort.is_set() or not await self._claim_end(task.id):
                     return
                 await updater.update_status(
                     state=TaskState.TASK_STATE_FAILED,
@@ -67,6 +76,14 @@ class GrokAgentExecutor(AgentExecutor):
                 return
 
             if abort.is_set():
+                return
+            if not await self._claim_end(task.id):
+                return
+            if abort.is_set():
+                await updater.update_status(
+                    state=TaskState.TASK_STATE_CANCELED,
+                    message=new_text_message("Canceled."),
+                )
                 return
 
             await updater.add_artifact(
@@ -95,16 +112,15 @@ class GrokAgentExecutor(AgentExecutor):
         if not cancel_task_id or not context_id:
             return
 
+        if not await self._claim_end(cancel_task_id):
+            return
+
         updater = TaskUpdater(
             event_queue=event_queue,
             task_id=cancel_task_id,
             context_id=context_id,
         )
-        try:
-            await updater.update_status(
-                state=TaskState.TASK_STATE_CANCELED,
-                message=new_text_message("Canceled."),
-            )
-        except RuntimeError:
-            # TaskUpdater already recorded a terminal state on this queue.
-            return
+        await updater.update_status(
+            state=TaskState.TASK_STATE_CANCELED,
+            message=new_text_message("Canceled."),
+        )
