@@ -44,7 +44,14 @@ class LoopbackTests(unittest.TestCase):
     def test_loopback_hosts(self) -> None:
         for host in ("127.0.0.1", "127.0.0.2", "localhost", "::1", "[::1]"):
             self.assertTrue(is_loopback_host(host), host)
-        for host in ("0.0.0.0", "::", "192.168.1.9", "example.com"):
+        for host in (
+            "0.0.0.0",
+            "::",
+            "192.168.1.9",
+            "example.com",
+            "127.evil.com",
+            "127.0.0.1.nip.io",
+        ):
             self.assertFalse(is_loopback_host(host), host)
 
     def test_loopback_urls(self) -> None:
@@ -52,6 +59,8 @@ class LoopbackTests(unittest.TestCase):
         self.assertTrue(is_loopback_url("http://localhost:9999/"))
         self.assertFalse(is_loopback_url("https://example.com"))
         self.assertFalse(is_loopback_url("http://0.0.0.0:9999"))
+        self.assertFalse(is_loopback_url("http://127.0.0.1.example.com"))
+        self.assertFalse(is_loopback_url("http://127.evil.com"))
 
 
 class BindPolicyTests(unittest.TestCase):
@@ -76,6 +85,15 @@ class BindPolicyTests(unittest.TestCase):
             assert_inbound_auth_allowed(
                 host="127.0.0.1",
                 public_url="https://agents.example.com",
+                token="",
+            )
+        self.assertIn("PUBLIC_URL", str(ctx.exception))
+
+    def test_127_prefix_hostname_is_not_loopback(self) -> None:
+        with self.assertRaises(RuntimeError) as ctx:
+            assert_inbound_auth_allowed(
+                host="127.0.0.1",
+                public_url="http://127.evil.com",
                 token="",
             )
         self.assertIn("PUBLIC_URL", str(ctx.exception))

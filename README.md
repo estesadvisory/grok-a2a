@@ -54,8 +54,9 @@ python scripts/smoke_client.py --text "ping"
 Non-loopback bind (requires inbound token):
 
 ```bash
-GROK_A2A_TOKEN=your-shared-token HOST=0.0.0.0 PUBLIC_URL=http://0.0.0.0:9999 python -m grok_a2a
-# other terminal:
+export GROK_A2A_TOKEN=your-shared-token
+HOST=0.0.0.0 PUBLIC_URL=http://0.0.0.0:9999 python -m grok_a2a
+# other terminal (same token value):
 python scripts/smoke_client.py --text "ping" --token "$GROK_A2A_TOKEN"
 ```
 

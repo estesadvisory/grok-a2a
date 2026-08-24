@@ -9,6 +9,7 @@ JSON-RPC (Agent Card stays public so clients can discover the scheme).
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import os
 import time
 from collections import defaultdict, deque
@@ -19,8 +20,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
-
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "0:0:0:0:0:0:0:1"})
 
 
 def _unauthorized() -> JSONResponse:
@@ -62,9 +61,12 @@ def is_loopback_host(host: str) -> bool:
     h = normalize_host(host)
     if not h:
         return False
-    if h in LOOPBACK_HOSTS:
+    if h == "localhost":
         return True
-    return h.startswith("127.")
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
 
 
 def is_loopback_url(url: str) -> bool:
@@ -156,8 +158,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         key = self._client_key(request)
         now = time.monotonic()
-        bucket = self._hits[key]
         cutoff = now - self.window_s
+        # Drop expired IPs so unique clients cannot grow the map without bound.
+        if len(self._hits) >= 1024:
+            for stale in list(self._hits):
+                q = self._hits[stale]
+                while q and q[0] <= cutoff:
+                    q.popleft()
+                if not q:
+                    del self._hits[stale]
+        bucket = self._hits[key]
         while bucket and bucket[0] <= cutoff:
             bucket.popleft()
         if len(bucket) >= self.limit:
